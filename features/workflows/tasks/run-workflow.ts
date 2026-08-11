@@ -1,43 +1,49 @@
 import toposort from "toposort"
 import { logger, task } from "@trigger.dev/sdk"
+import {
+  interpolate,
+  type NodeOutputs,
+} from "@/features/workflows/lib/interpolate"
 import { getWorkflow } from "@/features/workflows/data"
 import { Stagehand } from "@browserbasehq/stagehand"
-import { nodeExecutors } from "../nodes/node-executors"
+import { nodeExecutors } from "@/features/workflows/nodes/node-executors"
 
+// The Trigger.dev task the Run button fires. It loads the saved graph, works out
+// what order the nodes should run in, and walks them. For now each node just
+// announces itself — real execution (per-node executors, live progress, browser
+// sessions) gets layered on from here.
 export const runWorkflowTask = task({
   id: "run-workflow",
   run: async ({ workflowId, orgId }: { workflowId: string; orgId: string }) => {
-    const worflow = await getWorkflow(orgId, workflowId)
+    const workflow = await getWorkflow(orgId, workflowId)
 
-    if (!worflow?.graph) {
-      throw new Error(`Workflow ${worflow} has no graph`)
+    if (!workflow?.graph) {
+      throw new Error(`Workflow ${workflowId} has no graph`)
     }
 
-    const { nodes, edges } = worflow.graph
+    const { nodes, edges } = workflow.graph
     const byId = new Map(nodes.map((n) => [n.id, n]))
 
-    // Only connected nodes - anhything touching an edge
+    // Run only connected nodes — anything touching an edge. Orphans dropped on
     const connected = new Set(edges.flatMap((e) => [e.source, e.target]))
-
     const order = toposort
       .array(
         nodes.map((n) => n.id),
         edges.map((e) => [e.source, e.target])
       )
       .filter((id) => connected.has(id))
-    logger.log(`Running workflow ${worflow.name}`, { steps: order.length })
+    logger.log(`Running workflow ${workflow.name}`, { steps: order.length })
 
+    // The run owns one Browserbase session, opened lazily on the first browser step
+    // and reused by every later one, so the recording spans the whole flow. The
+    // LLM routes through Browserbase's Model Gateway (BROWSERBASE_API_KEY), so no
+    // separate provider key is needed.
     let stagehand: Stagehand | undefined
-
     const getStagehand = async () => {
       if (stagehand) {
         return stagehand
       }
 
-      // The run owns one Browserbase session, opened lazily on the first browser step
-      // and reused by every later one, so the recording spans the whole flow. The
-      // LLM routes through Browserbase's Model Gateway (BROWSERBASE_API_KEY), so no
-      // separate provider key is needed.
       stagehand = new Stagehand({
         env: "BROWSERBASE",
         apiKey: process.env.BROWSERBASE_API_KEY!,
@@ -51,14 +57,28 @@ export const runWorkflowTask = task({
       return stagehand
     }
 
+    // Each node's result, keyed by its id, so later nodes can pull from it.
+    // Because we walk in dependency order, every id a node references is already
+    // populated by the time we run it.
+    const outputs: NodeOutputs = {}
+
     for (const id of order) {
       const node = byId.get(id)!
       logger.log(`Running step: ${node.data.title}`)
       const executor = nodeExecutors[node.data.type]
 
-      if (executor) {
-        await executor({ values: node.data.values, getStagehand })
+      if (!executor) {
+        continue
       }
+
+      // Swap {{ nodeId.path }} placeholders for upstream output before running.
+      const values = Object.fromEntries(
+        Object.entries(node.data.values).map(([key, text]) => [
+          key,
+          interpolate({ text, outputs }),
+        ])
+      )
+      outputs[id] = await executor({ values, getStagehand })
     }
     await stagehand?.close()
     return { steps: order.length }
