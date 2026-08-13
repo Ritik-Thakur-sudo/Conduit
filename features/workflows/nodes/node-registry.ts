@@ -48,7 +48,7 @@ export const nodeRegistry = {
       {
         key: "url",
         label: "URL",
-        placeholder: "https://google.com",
+        placeholder: "https://youtube.com",
         required: true,
       },
     ],
