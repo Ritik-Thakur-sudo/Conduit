@@ -100,6 +100,8 @@ function Field({
   field: NodeField
   value: string
   onChange: (value: string) => void
+  // Fires when the field gains focus, so the Connections chips know which
+  // field a clicked token should land in.
   onFocus: () => void
 }) {
   if (field.multiline) {
@@ -108,8 +110,8 @@ function Field({
         id={field.key}
         value={value}
         placeholder={field.placeholder}
-        onChange={(e) => onChange(e.target.value)}
         onFocus={onFocus}
+        onChange={(e) => onChange(e.target.value)}
       />
     )
   }
@@ -119,8 +121,8 @@ function Field({
       id={field.key}
       value={value}
       placeholder={field.placeholder}
-      onChange={(e) => onChange(e.target.value)}
       onFocus={onFocus}
+      onChange={(e) => onChange(e.target.value)}
     />
   )
 }
@@ -128,8 +130,12 @@ function Field({
 // The Editor tab: one input per field on the selected node, or an empty state.
 function Inspector({ node }: { node: StepNodeType | undefined }) {
   const { updateNodeData } = useReactFlow<StepNodeType>()
-  const connections = useUpstreamConnections(node)
-  const [lastEditedField, setLastEditedField] = useState<string>()
+  // Outputs of every node upstream of the selected one, as insertable {{ }}
+  // tokens. Empty when nothing feeds into this node.
+  const connections = useUpstreamConnections()
+  // The field a clicked chip inserts into — whichever was focused most recently.
+  // Reset per selected node since this component is keyed by node id.
+  const [activeFieldKey, setActiveFieldKey] = useState<string | null>(null)
 
   if (!node) {
     return (
@@ -141,20 +147,17 @@ function Inspector({ node }: { node: StepNodeType | undefined }) {
 
   const { type, title, values } = node.data
   const def: NodeDefinition = nodeRegistry[type]
-  const targetField = def.fields.some((field) => field.key === lastEditedField)
-    ? lastEditedField
-    : def.fields[0]?.key
 
-  const insertConnection = (token: string) => {
-    if (!targetField) {
+  // Untouched fields fall back to the first one, so a chip always has a home.
+  const targetKey = activeFieldKey ?? def.fields[0]?.key
+
+  const insertToken = (token: string) => {
+    if (!targetKey) {
       return
     }
 
     updateNodeData(node.id, {
-      values: {
-        ...values,
-        [targetField]: `${values[targetField] ?? ""}${token}`,
-      },
+      values: { ...values, [targetKey]: (values[targetKey] ?? "") + token },
     })
   }
 
@@ -173,35 +176,32 @@ function Inspector({ node }: { node: StepNodeType | undefined }) {
               <Field
                 field={field}
                 value={values[field.key] ?? ""}
+                onFocus={() => setActiveFieldKey(field.key)}
                 onChange={(value) => {
                   updateNodeData(node.id, {
                     values: { ...values, [field.key]: value },
                   })
                 }}
-                onFocus={() => setLastEditedField(field.key)}
               />
             </div>
           ))
         )}
+
+        {/* Available upstream outputs — click to drop a token into the last
+            focused field (or the first field if none has been touched). */}
         {connections.length > 0 && (
-          <div className="flex flex-col gap-1.5 border-t pt-3">
-            <h3 className="text-xs font-medium text-muted-foreground">
-              Connections
-            </h3>
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-xs">Connections</Label>
             <div className="flex flex-wrap gap-1.5">
               {connections.map((connection) => (
                 <button
                   key={connection.token}
                   type="button"
-                  disabled={!targetField}
-                  onClick={() => insertConnection(connection.token)}
-                  className="flex items-center gap-1.5 rounded-md border bg-background px-1.5 py-1 text-xs shadow-xs transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
+                  onClick={() => insertToken(connection.token)}
+                  className="flex max-w-full items-center gap-1.5 rounded-md border border-border bg-card px-1.5 py-1 text-xs hover:bg-accent"
                 >
-                  <NodeIcon
-                    type={connection.type}
-                    className="size-5 rounded-sm"
-                  />
-                  {connection.label}
+                  <NodeIcon type={connection.nodeType} className="size-4" />
+                  <span className="truncate">{connection.label}</span>
                 </button>
               ))}
             </div>
@@ -356,9 +356,9 @@ function RunButton({ workflowId }: { workflowId: string }) {
       variant="secondary"
       disabled={isPending}
       onClick={() => {
-        // TODO: validate the graph and run the workflow (toggle to Stop while running).
         const graph = { nodes: getNodes(), edges: getEdges() }
         const problems = validateGraph(graph)
+
         if (problems.length > 0) {
           toast.error(problems[0])
           return
@@ -381,13 +381,10 @@ function RunButton({ workflowId }: { workflowId: string }) {
 
 export function RightSidebar({ workflowId }: { workflowId: string }) {
   const [tab, setTab] = useState("toolbar")
-
-  // TODO: read the currently selected node from React Flow.
   const selected = useStore((s) => s.nodes.find((n) => n.selected)) as
     StepNodeType | undefined
-
-  // TODO: auto-switch to the Editor tab when the selection changes.
   const [prevSelectedId, setPrevSelectedId] = useState(selected?.id)
+
   if (selected && selected.id !== prevSelectedId) {
     setPrevSelectedId(selected.id)
     setTab("editor")
@@ -424,7 +421,7 @@ export function RightSidebar({ workflowId }: { workflowId: string }) {
           <Palette />
         </TabsContent>
         <TabsContent value="editor" className="flex min-h-0 flex-col">
-          <Inspector key={selected?.id } node={selected} />
+          <Inspector key={selected?.id} node={selected} />
         </TabsContent>
       </Tabs>
     </ResizablePanel>

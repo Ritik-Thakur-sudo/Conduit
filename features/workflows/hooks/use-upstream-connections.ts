@@ -1,7 +1,5 @@
-"use client"
-
 import { useMemo } from "react"
-import { getIncomers, useEdges, useNodes } from "@xyflow/react"
+import { getIncomers, useStore } from "@xyflow/react"
 import {
   nodeRegistry,
   type NodeType,
@@ -11,52 +9,46 @@ import {
 export type UpstreamConnection = {
   token: string
   label: string
-  type: NodeType
+  nodeType: NodeType
 }
 
-export function useUpstreamConnections(
-  selectedNode: StepNodeType | undefined
-): UpstreamConnection[] {
-  const nodes = useNodes<StepNodeType>()
-  const edges = useEdges()
+export function useUpstreamConnections(): UpstreamConnection[] {
+  const nodes = useStore((s) => s.nodes) as StepNodeType[]
+  const edges = useStore((s) => s.edges)
+  const selected = nodes.find((n) => n.selected)
 
   return useMemo(() => {
-    if (!selectedNode) {
+    if (!selected) {
       return []
     }
 
-    const currentNode = nodes.find((node) => node.id === selectedNode.id)
+    const ancestors: StepNodeType[] = []
+    const seen = new Set<string>()
+    const queue: StepNodeType[] = [selected]
 
-    if (!currentNode) {
-      return []
-    }
-
-    const upstreamIds = new Set<string>()
-    const nodesToVisit = [currentNode]
-
-    while (nodesToVisit.length > 0) {
-      const node = nodesToVisit.pop()!
-
-      for (const upstreamNode of getIncomers(node, nodes, edges)) {
-        if (upstreamIds.has(upstreamNode.id)) {
+    while (queue.length) {
+      const current = queue.shift()!
+      for (const incomer of getIncomers(
+        current,
+        nodes,
+        edges
+      ) as StepNodeType[]) {
+        if (seen.has(incomer.id)) {
           continue
         }
 
-        upstreamIds.add(upstreamNode.id)
-        nodesToVisit.push(upstreamNode)
+        seen.add(incomer.id)
+        ancestors.push(incomer)
+        queue.push(incomer)
       }
     }
 
-    return nodes.flatMap((node) => {
-      if (!upstreamIds.has(node.id)) {
-        return []
-      }
-
-      return nodeRegistry[node.data.type].outputs.map((output) => ({
+    return ancestors.flatMap((node) =>
+      nodeRegistry[node.data.type].outputs.map((output) => ({
         token: `{{ ${node.id}.${output.path} }}`,
         label: `${node.data.title} · ${output.label}`,
-        type: node.data.type,
+        nodeType: node.data.type,
       }))
-    })
-  }, [edges, nodes, selectedNode])
+    )
+  }, [selected, nodes, edges])
 }
