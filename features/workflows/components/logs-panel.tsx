@@ -1,6 +1,7 @@
 "use client"
 
 import prettyMilliseconds from "pretty-ms"
+import { MonitorPlay } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { NodeIcon } from "@/features/workflows/components/node-icon"
 import {
@@ -10,9 +11,17 @@ import {
 import type { RunStep } from "@/features/workflows/tasks/run-workflow"
 
 export interface StepSelection {
+  kind: "step"
   runId: string
   nodeId: string
 }
+
+export interface ReplaySelection {
+  kind: "replay"
+  runId: string
+}
+
+export type ConsoleSelection = StepSelection | ReplaySelection
 
 function StepRow({
   run,
@@ -32,7 +41,9 @@ function StepRow({
   return (
     <button
       type="button"
-      onClick={() => onSelect({ runId: run.id, nodeId: step.nodeId })}
+      onClick={() =>
+        onSelect({ kind: "step", runId: run.id, nodeId: step.nodeId })
+      }
       className={cn(
         "flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-xs hover:bg-accent",
         isSelected && "bg-accent",
@@ -54,12 +65,38 @@ function StepRow({
   )
 }
 
+function ReplayRow({
+  run,
+  isSelected,
+  onSelect,
+}: {
+  run: ConsoleRun
+  isSelected: boolean
+  onSelect: (selection: ReplaySelection) => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect({ kind: "replay", runId: run.id })}
+      className={cn(
+        "flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-xs hover:bg-accent",
+        isSelected && "bg-accent"
+      )}
+    >
+      <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+        <MonitorPlay className="size-3.5" />
+      </span>
+      <span className="truncate font-medium">Replay</span>
+    </button>
+  )
+}
+
 export function LogsPanel({
   selected,
-  onSelectStep,
+  onSelect,
 }: {
-  selected: StepSelection | null
-  onSelectStep: (selection: StepSelection) => void
+  selected: ConsoleSelection | null
+  onSelect: (selection: ConsoleSelection) => void
 }) {
   const runs = useConsoleRuns()
 
@@ -85,11 +122,22 @@ export function LogsPanel({
               run={run}
               step={step}
               isSelected={
-                selected?.runId === run.id && selected.nodeId === step.nodeId
+                selected?.kind === "step" &&
+                selected.runId === run.id &&
+                selected.nodeId === step.nodeId
               }
-              onSelect={onSelectStep}
+              onSelect={onSelect}
             />
           ))}
+          {run.browserbaseSessionId && !run.isLive && (
+            <ReplayRow
+              run={run}
+              isSelected={
+                selected?.kind === "replay" && selected.runId === run.id
+              }
+              onSelect={onSelect}
+            />
+          )}
         </div>
       ))}
     </div>

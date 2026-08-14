@@ -48,7 +48,6 @@ export function WorkflowRunsProvider({
 
 function useWorkflowRuns() {
   const ctx = useContext(WorkflowRunsContext)
-
   if (!ctx) {
     throw new Error(
       "useWorkflowRuns must be used within a WorkflowRunsProvider"
@@ -85,7 +84,6 @@ export function useLatestRunSteps(): LatestRunSteps {
       if (!newest || run.createdAt > newest.createdAt) {
         return run
       }
-
       return newest
     }, undefined)
 
@@ -97,7 +95,15 @@ export function useLatestRunSteps(): LatestRunSteps {
   }, [runs])
 }
 
-// One run flattened for the console: its identity and statusrun, whether it's still
+// The Browserbase session id a finished run drove, read from its final output so
+// a panel can fetch the replay. Only the output carries it — the recording lags
+// the session close, so the live metadata never has it — so an in-flight or
+// failed run reports undefined.
+function sessionIdForRun(run: WorkflowRun): string | undefined {
+  return run.output?.browserbaseSessionId
+}
+
+// One run flattened for the console: its identity and status, whether it's still
 // live, and its steps with everything each one produced.
 export interface ConsoleRun {
   id: string
@@ -105,6 +111,8 @@ export interface ConsoleRun {
   createdAt: Date
   isLive: boolean
   steps: RunStep[]
+  // The Browserbase session id to replay, present only once the run has finished.
+  browserbaseSessionId?: string
 }
 
 // Every run, newest first, with its steps resolved — the full history a console
@@ -122,6 +130,7 @@ export function useConsoleRuns(): ConsoleRun[] {
           createdAt: run.createdAt,
           isLive: isRunLive(run),
           steps: stepsForRun(run),
+          browserbaseSessionId: sessionIdForRun(run),
         })),
     [runs]
   )
