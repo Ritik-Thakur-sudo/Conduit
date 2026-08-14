@@ -51,10 +51,18 @@ export async function runWorkflowAction({
   id: string
   graph: WorkflowGraph
 }) {
-  const { orgId } = await auth()
+  const { has, orgId } = await auth()
 
   if (!orgId) {
     throw new Error("No active organization")
+  }
+
+  const containsAgentNode = graph.nodes.some(
+    (node) => node.data.type === "agent"
+  )
+
+  if (containsAgentNode && !has({ plan: "org:pro" })) {
+    throw new Error("Pro plan required to run workflows with an Agent node")
   }
 
   await saveWorkflowGraph({ orgId, id, graph })

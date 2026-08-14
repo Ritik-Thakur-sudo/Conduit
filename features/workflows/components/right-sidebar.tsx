@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react"
 import { useReactFlow, useStore } from "@xyflow/react"
-import { MoreHorizontal, Play, Trash2 } from "lucide-react"
+import { Lock, MoreHorizontal, Play, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import {
   Accordion,
@@ -27,6 +27,7 @@ import {
   runWorkflowAction,
 } from "@/features/workflows/actions"
 import { NodeIcon } from "@/features/workflows/components/node-icon"
+import { useOrganizationPro } from "@/features/workflows/hooks/use-organization-pro"
 import { useUpstreamConnections } from "@/features/workflows/hooks/use-upstream-connections"
 import { validateGraph } from "@/features/workflows/lib/validate-graph"
 import {
@@ -215,8 +216,20 @@ function Palette() {
   // The pane's measured size, used to find the center of the current view.
   const width = useStore((s) => s.width)
   const height = useStore((s) => s.height)
+  const { isLoaded, isPro, upgrade } = useOrganizationPro()
 
   const add = (type: NodeType) => {
+    if (type === "agent") {
+      if (!isLoaded) {
+        return
+      }
+
+      if (!isPro) {
+        upgrade()
+        return
+      }
+    }
+
     const def = nodeRegistry[type]
     const nodes = getNodes()
 
@@ -270,17 +283,32 @@ function Palette() {
             <AccordionContent className="flex flex-col gap-0.5">
               {definitions
                 .filter((def) => def.kind === section.kind)
-                .map((def) => (
-                  <Button
-                    key={def.type}
-                    variant="ghost"
-                    onClick={() => add(def.type as NodeType)}
-                    className="justify-start gap-2.5 px-1.5 text-xs"
-                  >
-                    <NodeIcon type={def.type as NodeType} />
-                    {def.label}
-                  </Button>
-                ))}
+                .map((def) => {
+                  const isLocked = def.type === "agent" && (!isLoaded || !isPro)
+
+                  return (
+                    <Button
+                      key={def.type}
+                      variant="ghost"
+                      onClick={() => add(def.type as NodeType)}
+                      title={
+                        isLocked
+                          ? "Upgrade to Pro to use the Agent node"
+                          : undefined
+                      }
+                      className="justify-start gap-2.5 px-1.5 text-xs"
+                    >
+                      <NodeIcon type={def.type as NodeType} />
+                      {def.label}
+                      {isLocked && (
+                        <Lock
+                          aria-label="Pro plan required"
+                          className="ml-auto size-3.5 text-muted-foreground"
+                        />
+                      )}
+                    </Button>
+                  )
+                })}
             </AccordionContent>
           </AccordionItem>
         ))}
@@ -366,7 +394,7 @@ export function RightSidebar({ workflowId }: { workflowId: string }) {
   const selected = useStore((s) => s.nodes.find((n) => n.selected)) as
     StepNodeType | undefined
   const [prevSelectedId, setPrevSelectedId] = useState(selected?.id)
-  
+
   if (selected && selected.id !== prevSelectedId) {
     setPrevSelectedId(selected.id)
     setTab("editor")
