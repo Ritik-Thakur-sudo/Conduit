@@ -34,7 +34,6 @@ export const runWorkflowTask = task({
   id: "run-workflow",
   run: async ({ workflowId, orgId }: { workflowId: string; orgId: string }) => {
     const workflow = await getWorkflow(orgId, workflowId)
-
     if (!workflow?.graph) {
       throw new Error(`Workflow ${workflowId} has no graph`)
     }
@@ -72,7 +71,7 @@ export const runWorkflowTask = task({
     // this one boundary rather than constraining the shape the console reads.
     const publishSteps = () =>
       metadata.set("steps", steps as unknown as DeserializedJson[])
-    
+
     publishSteps()
 
     // The run owns one Browserbase session, opened lazily on the first browser step
@@ -80,12 +79,14 @@ export const runWorkflowTask = task({
     // LLM routes through Browserbase's Model Gateway (BROWSERBASE_API_KEY), so no
     // separate provider key is needed.
     let stagehand: Stagehand | undefined
+    // The Browserbase session id, captured the moment the session opens so it can
+    // be returned in the run's output — a panel reads it there to fetch the replay
+    // once the run finishes and the recording is available.
+    let browserbaseSessionId: string | undefined
     const getStagehand = async () => {
-
       if (stagehand) {
         return stagehand
       }
-
       stagehand = new Stagehand({
         env: "BROWSERBASE",
         apiKey: process.env.BROWSERBASE_API_KEY!,
@@ -96,6 +97,7 @@ export const runWorkflowTask = task({
         disablePino: true,
       })
       await stagehand.init()
+      browserbaseSessionId = stagehand.browserbaseSessionID
       return stagehand
     }
 
@@ -114,7 +116,6 @@ export const runWorkflowTask = task({
       // output — mark it done rather than leaving it "pending", which reads as
       // skipped forever in the console.
       const executor = nodeExecutors[node.data.type]
-
       if (!executor) {
         step.status = "done"
         publishSteps()
@@ -160,6 +161,6 @@ export const runWorkflowTask = task({
       publishSteps()
     }
     await stagehand?.close()
-    return { steps }
+    return { steps, browserbaseSessionId }
   },
 })
