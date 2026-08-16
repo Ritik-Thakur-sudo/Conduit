@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react"
 import { useReactFlow, useStore } from "@xyflow/react"
-import { Lock, MoreHorizontal, Play, Trash2 } from "lucide-react"
+import { Lock, MoreHorizontal, Play, Square, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import {
   Accordion,
@@ -23,10 +23,12 @@ import { ResizablePanel } from "@/components/ui/resizable"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import {
+  cancelWorkflowAction,
   deleteWorkflowAction,
   runWorkflowAction,
 } from "@/features/workflows/actions"
 import { NodeIcon } from "@/features/workflows/components/node-icon"
+import { useLiveRun } from "@/features/workflows/components/workflow-runs-provider"
 import { useOrganizationPro } from "@/features/workflows/hooks/use-organization-pro"
 import { useUpstreamConnections } from "@/features/workflows/hooks/use-upstream-connections"
 import { validateGraph } from "@/features/workflows/lib/validate-graph"
@@ -208,6 +210,11 @@ const sections: { kind: StepNodeKind; label: string }[] = [
 // Every node type from the registry, filtered into the groups below.
 const definitions = Object.values(nodeRegistry)
 
+// Node types that only orgs on the Pro plan can add. The Agent node is our most
+// expensive node, so it's gated; every other node stays free to keep workflow
+// building open to everyone.
+const premiumNodes = new Set<NodeType>(["agent"])
+
 // The Toolbar tab: a button per node type that adds it to the canvas.
 function Palette() {
   // The shared React Flow store (lifted to a provider above the canvas and this
@@ -216,18 +223,20 @@ function Palette() {
   // The pane's measured size, used to find the center of the current view.
   const width = useStore((s) => s.width)
   const height = useStore((s) => s.height)
+  // Whether the active org is on Pro, plus a way to send them to upgrade. Gates
+  // the premium nodes below.
   const { isLoaded, isPro, upgrade } = useOrganizationPro()
 
-  const add = (type: NodeType) => {
-    if (type === "agent") {
-      if (!isLoaded) {
-        return
-      }
+  // A premium node is locked until the plan check has loaded and confirms Pro.
+  // We wait for `isLoaded` so a Pro org never flashes a locked state on mount.
+  const isLocked = (type: NodeType) =>
+    premiumNodes.has(type) && isLoaded && !isPro
 
-      if (!isPro) {
-        upgrade()
-        return
-      }
+  const add = (type: NodeType) => {
+    // Premium nodes route to upgrade instead of being added for non-pro orgs.
+    if (isLocked(type)) {
+      upgrade()
+      return
     }
 
     const def = nodeRegistry[type]
@@ -284,27 +293,22 @@ function Palette() {
               {definitions
                 .filter((def) => def.kind === section.kind)
                 .map((def) => {
-                  const isLocked = def.type === "agent" && (!isLoaded || !isPro)
-
+                  const type = def.type as NodeType
+                  const locked = isLocked(type)
                   return (
                     <Button
                       key={def.type}
                       variant="ghost"
-                      onClick={() => add(def.type as NodeType)}
+                      onClick={() => add(type)}
                       title={
-                        isLocked
-                          ? "Upgrade to Pro to use the Agent node"
-                          : undefined
+                        locked ? "Upgrade to Pro to add this node" : undefined
                       }
                       className="justify-start gap-2.5 px-1.5 text-xs"
                     >
-                      <NodeIcon type={def.type as NodeType} />
+                      <NodeIcon type={type} />
                       {def.label}
-                      {isLocked && (
-                        <Lock
-                          aria-label="Pro plan required"
-                          className="ml-auto size-3.5 text-muted-foreground"
-                        />
+                      {locked && (
+                        <Lock className="ml-auto size-3.5 text-muted-foreground" />
                       )}
                     </Button>
                   )
@@ -355,10 +359,37 @@ function ActionsMenu({ workflowId }: { workflowId: string }) {
   )
 }
 
-// Kicks off a run of the current workflow.
+// Toggles between running the current workflow and stopping the run in flight.
+// While a run is live it becomes a Stop button that cancels that run; otherwise
+// it validates the graph and kicks off a new run.
 function RunButton({ workflowId }: { workflowId: string }) {
   const { getNodes, getEdges } = useReactFlow<StepNodeType>()
   const [isPending, startTransition] = useTransition()
+  // The run in flight, if any. At most one is live at a time, so its presence
+  // decides which mode the button is in.
+  const liveRun = useLiveRun()
+
+  if (liveRun) {
+    return (
+      <Button
+        size="sm"
+        variant="destructive"
+        disabled={isPending}
+        onClick={() => {
+          startTransition(async () => {
+            try {
+              await cancelWorkflowAction(liveRun.id)
+            } catch {
+              toast.error("Couldn't stop the run.")
+            }
+          })
+        }}
+      >
+        <Square fill="currentColor" />
+        Stop
+      </Button>
+    )
+  }
 
   return (
     <Button
@@ -368,7 +399,6 @@ function RunButton({ workflowId }: { workflowId: string }) {
       onClick={() => {
         const graph = { nodes: getNodes(), edges: getEdges() }
         const problems = validateGraph(graph)
-
         if (problems.length > 0) {
           toast.error(problems[0])
           return
@@ -394,7 +424,6 @@ export function RightSidebar({ workflowId }: { workflowId: string }) {
   const selected = useStore((s) => s.nodes.find((n) => n.selected)) as
     StepNodeType | undefined
   const [prevSelectedId, setPrevSelectedId] = useState(selected?.id)
-
   if (selected && selected.id !== prevSelectedId) {
     setPrevSelectedId(selected.id)
     setTab("editor")

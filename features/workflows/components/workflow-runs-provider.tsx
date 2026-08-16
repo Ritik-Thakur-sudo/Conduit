@@ -24,6 +24,9 @@ interface WorkflowRunsProviderProps {
   children: React.ReactNode
 }
 
+// One shared realtime subscription to every run tagged workflow:<id>. Any
+// component on the canvas reads it through the hooks below instead of opening
+// its own socket.
 export function WorkflowRunsProvider({
   workflowId,
   accessToken,
@@ -93,6 +96,13 @@ export function useLatestRunSteps(): LatestRunSteps {
 
     return { steps: stepsForRun(latest), isLive: isRunLive(latest) }
   }, [runs])
+}
+
+// The run currently in flight, if any — at most one is live at a time. A Stop
+// button reads this to know whether there's a run to cancel and, if so, its id.
+export function useLiveRun(): WorkflowRun | undefined {
+  const { runs } = useWorkflowRuns()
+  return useMemo(() => runs.find(isRunLive), [runs])
 }
 
 // The Browserbase session id a finished run drove, read from its final output so
