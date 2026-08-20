@@ -1,8 +1,14 @@
 import { auth, currentUser } from "@clerk/nextjs/server"
+import * as Sentry from "@sentry/nextjs"
 import { liveblocks } from "@/lib/liveblocks"
 
 export async function POST() {
   const { userId, orgId } = await auth()
+  Sentry.getIsolationScope().setAttributes({
+    route: "/api/liveblocks/auth",
+    userId: userId ?? "anonymous",
+    orgId: orgId ?? "none",
+  })
 
   if (!userId || !orgId) {
     return new Response("Unauthorized", { status: 401 })
@@ -16,22 +22,33 @@ export async function POST() {
 
   // Identify the user with an ID token. Permissions are resolved per-room
   // from the user's groups — scope access to their Clerk organization.
-  const { status, body } = await liveblocks.identifyUser(
-    {
-      userId,
-      groupIds: [orgId],
-      organizationId: orgId,
-    },
-    {
-      userInfo: {
-        name:
-          user.fullName ??
-          user.username ??
-          user.primaryEmailAddress?.emailAddress ??
-          "Anonymous",
-        avatar: user.imageUrl,
+  try {
+    const { status, body } = await liveblocks.identifyUser(
+      {
+        userId,
+        groupIds: [orgId],
+        organizationId: orgId,
       },
-    }
-  )
-  return new Response(body, { status })
+      {
+        userInfo: {
+          name:
+            user.fullName ??
+            user.username ??
+            user.primaryEmailAddress?.emailAddress ??
+            "Anonymous",
+          avatar: user.imageUrl,
+        },
+      }
+    )
+    Sentry.logger.info("Liveblocks user identified", {
+      route: "/api/liveblocks/auth",
+      status,
+    })
+    return new Response(body, { status })
+  } catch (error) {
+    Sentry.logger.error("Liveblocks user identification failed", {
+      route: "/api/liveblocks/auth",
+    })
+    throw error
+  }
 }

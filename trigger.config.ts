@@ -1,4 +1,16 @@
 import { defineConfig } from "@trigger.dev/sdk"
+import { esbuildPlugin } from "@trigger.dev/build/extensions"
+import { sentryEsbuildPlugin } from "@sentry/esbuild-plugin"
+import {
+  captureTriggerTaskFailure,
+  initializeTriggerSentry,
+} from "./features/workflows/tasks/sentry"
+
+const hasSentrySourceMapConfiguration = Boolean(
+  process.env.SENTRY_AUTH_TOKEN &&
+  process.env.SENTRY_ORG &&
+  process.env.SENTRY_PROJECT
+)
 
 export default defineConfig({
   project: "proj_qcbnyjekgqjxerfbudxz",
@@ -19,4 +31,24 @@ export default defineConfig({
     },
   },
   dirs: ["features"],
+  init: async () => {
+    initializeTriggerSentry()
+  },
+  onFailure: async ({ payload, error, ctx }) => {
+    captureTriggerTaskFailure({ payload, error, ctx })
+  },
+  build: {
+    extensions: hasSentrySourceMapConfiguration
+      ? [
+          esbuildPlugin(
+            sentryEsbuildPlugin({
+              authToken: process.env.SENTRY_AUTH_TOKEN,
+              org: process.env.SENTRY_ORG,
+              project: process.env.SENTRY_PROJECT,
+            }),
+            { placement: "last", target: "deploy" }
+          ),
+        ]
+      : [],
+  },
 })
