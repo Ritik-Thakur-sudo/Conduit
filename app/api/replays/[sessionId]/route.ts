@@ -1,7 +1,7 @@
 import { auth } from "@clerk/nextjs/server"
 import { NotFoundError } from "@browserbasehq/sdk"
 import * as Sentry from "@sentry/nextjs"
-import { browserbase } from "@/lib/browserbase"
+import {getBrowserbase } from "@/lib/browserbase"
 
 export async function GET(
   _request: Request,
@@ -21,14 +21,14 @@ export async function GET(
   }
 
   try {
-    const replay = await browserbase.sessions.replays.retrieve(sessionId)
+    const replay = await getBrowserbase().sessions.replays.retrieve(sessionId)
     const firstPage = replay.pages[0]
 
     if (!firstPage) {
       return new Response(null, { status: 202 })
     }
 
-    const playlist = await browserbase.sessions.replays.retrievePage(
+    const playlist = await getBrowserbase().sessions.replays.retrievePage(
       sessionId,
       firstPage.pageId
     )
