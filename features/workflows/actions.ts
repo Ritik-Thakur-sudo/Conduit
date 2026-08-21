@@ -6,7 +6,7 @@ import { runs, tasks } from "@trigger.dev/sdk"
 import { revalidatePath } from "next/cache"
 import { redirect } from "next/navigation"
 import type { runWorkflowTask } from "@/features/workflows/tasks/run-workflow"
-import { liveblocks } from "@/lib/liveblocks"
+import { getLiveblocks } from "@/lib/liveblocks"
 import {
   createWorkflow,
   deleteWorkflow,
@@ -54,7 +54,7 @@ export async function deleteWorkflowAction(id: string) {
   }
 
   // The workflow id doubles as its Liveblocks room id — clean it up too.
-  await liveblocks.deleteRoom(id)
+  await getLiveblocks().deleteRoom(id)
   Sentry.logger.info("Workflow deleted", { action: "deleteWorkflowAction" })
   revalidatePath("/workflows", "layout")
   redirect("/")
