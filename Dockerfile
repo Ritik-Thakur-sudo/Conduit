@@ -16,7 +16,9 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
 ENV NEXT_TELEMETRY_DISABLED=1
-ENV DATABASE_URL=postgresql://build:build@localhost:5432/build
+
+ARG DATABASE_URL=postgresql://ci:ci@localhost:5432/ci
+ENV DATABASE_URL=$DATABASE_URL
 
 RUN npm run build
 
