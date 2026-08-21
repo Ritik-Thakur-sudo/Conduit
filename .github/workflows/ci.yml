@@ -38,9 +38,6 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Temporary CI gate test
-        run: exit 1
-
   docker:
     name: Docker Build
     runs-on: ubuntu-latest
